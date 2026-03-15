@@ -1,0 +1,141 @@
+import 'package:flutter/material.dart';
+
+void main() {
+  runApp(const UnitConverterApp());
+}
+
+class UnitConverterApp extends StatelessWidget {
+  const UnitConverterApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'Unit Converter',
+      // Material 3 makes the app look modern on Android 15
+      theme: ThemeData(
+        useMaterial3: true,
+        colorSchemeSeed: Colors.deepPurple,
+      ),
+      home: const ConverterPage(),
+    );
+  }
+}
+
+class ConverterPage extends StatefulWidget {
+  const ConverterPage({super.key});
+
+  @override
+  State<ConverterPage> createState() => _ConverterPageState();
+}
+
+class _ConverterPageState extends State<ConverterPage> {
+  final TextEditingController inputController = TextEditingController();
+  String fromUnit = "Kilometers";
+  String toUnit = "Miles";
+  double result = 0;
+
+  final List<String> units = ["Kilometers", "Miles", "Meters", "Feet"];
+
+  void convert() {
+    double value = double.tryParse(inputController.text) ?? 0;
+    
+    // Logic expanded to handle more units
+    double valueInKm;
+    if (fromUnit == "Miles") valueInKm = value / 0.621371;
+    else if (fromUnit == "Meters") valueInKm = value / 1000;
+    else if (fromUnit == "Feet") valueInKm = value / 3280.84;
+    else valueInKm = value;
+
+    setState(() {
+      if (toUnit == "Miles") result = valueInKm * 0.621371;
+      else if (toUnit == "Meters") result = valueInKm * 1000;
+      else if (toUnit == "Feet") result = valueInKm * 3280.84;
+      else result = valueInKm;
+    });
+  }
+
+  void swapUnits() {
+    setState(() {
+      final temp = fromUnit;
+      fromUnit = toUnit;
+      toUnit = temp;
+      convert();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("Unit Converter"),
+        centerTitle: true,
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          children: [
+            Card(
+              elevation: 0,
+              color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: TextField(
+                  controller: inputController,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: "Enter value",
+                    prefixIcon: Icon(Icons.numbers),
+                    border: InputBorder.none,
+                  ),
+                  onChanged: (_) => convert(), // Auto-convert as you type!
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(child: _buildDropdown(fromUnit, (val) => setState(() => fromUnit = val!))),
+                IconButton(
+                  onPressed: swapUnits,
+                  icon: const Icon(Icons.swap_horiz, size: 30),
+                  color: Colors.deepPurple,
+                ),
+                Expanded(child: _buildDropdown(toUnit, (val) => setState(() => toUnit = val!))),
+              ],
+            ),
+            const Spacer(),
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primaryContainer,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Column(
+                children: [
+                  const Text("Result", style: TextStyle(fontSize: 16)),
+                  Text(
+                    result.toStringAsFixed(3),
+                    style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold),
+                  ),
+                  Text(toUnit, style: const TextStyle(fontSize: 18)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 40),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDropdown(String currentVal, ValueChanged<String?> onChanged) {
+    return DropdownButtonFormField<String>(
+      value: currentVal,
+      decoration: const InputDecoration(border: OutlineInputBorder()),
+      items: units.map((u) => DropdownMenuItem(value: u, child: Text(u))).toList(),
+      onChanged: onChanged,
+    );
+  }
+}
