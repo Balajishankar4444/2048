@@ -12,11 +12,22 @@ import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart'; 
 import 'sound_manager.dart';
 
+import 'package:firebase_auth/firebase_auth.dart'; // Ensure this import is at the top
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // Sign in anonymously to satisfy your new Production Rules
+  try {
+    final userCredential = await FirebaseAuth.instance.signInAnonymously();
+    debugPrint("Signed in with UID: ${userCredential.user?.uid}");
+  } catch (e) {
+    debugPrint("Auth Error: $e");
+  }
+
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   
   runApp(
@@ -235,10 +246,13 @@ const Text("PERSONAL STATS", style: TextStyle(color: Colors.white38, fontSize: 1
 const SizedBox(height: 16),
 
 // REPLACE/UPDATE THESE ROWS:
+// Inside _ProfileScreenState in main.dart
+
 _statsRow("All-Time Best", "${engine.bestScore}"),
-_statsRow("Highest Tile", "${engine.highestTileReached}"), // Added this
-_statsRow("Time Played", _formatTime(engine.totalSecondsPlayed)), // Added this
-_statsRow("Current Level", "${engine.level}"),
+_statsRow("Highest Tile", "${engine.highestTileReached}"),
+_statsRow("Time Played", _formatTime(engine.totalSecondsPlayed)),
+// This will now show the highest level saved in the engine
+_statsRow("All-Time Level", "${engine.level}"),
             const Spacer(),
             SizedBox(
               width: double.infinity,
@@ -548,7 +562,6 @@ void _updateHighestTile() {
   tiles = [];
   history = [];
   score = 0;
-  level = 1;
   combo = 0;
   gameOver = false;
   hasWon = false;
@@ -621,12 +634,37 @@ void undoMove() {
 
 void shuffleBoard() {
   if (mode == GameMode.timeAttack && gameOver) return;
-
   if (shufflesAvailable <= 0 || tiles.isEmpty) return;
-  // ... your shuffle logic ...
+
+  List<Point<int>> emptySpots = [];
+
+  for (int x = 0; x < gridSize; x++) {
+    for (int y = 0; y < gridSize; y++) {
+      emptySpots.add(Point(x, y));
+    }
+  }
+
+  emptySpots.shuffle();
+
+  List<Tile> shuffledTiles = [];
+
+  for (int i = 0; i < tiles.length; i++) {
+    shuffledTiles.add(Tile(
+      id: _uuid.v4(),
+      x: emptySpots[i].x,
+      y: emptySpots[i].y,
+      value: tiles[i].value,
+      isNew: false,
+    ));
+  }
+
+  tiles = shuffledTiles;
+
   shufflesAvailable--;
-  gameOver = false; 
+  gameOver = false;
+
   _saveData();
+  HapticFeedback.mediumImpact();
   notifyListeners();
 }
 
@@ -806,13 +844,14 @@ bool isSoundEnabled = true; // Default to true
 
   // Inside GameEngine class
 void _updateLevel() {
-  // Calculates level based on score (e.g., Level 2 at 2000 points)
-  int newLevel = (score / 2000).floor() + 1; 
+  // 1. Calculate the potential level based on score
+  int calculatedLevel = (score / 2000).floor() + 1; 
   
-  if (newLevel > level) {
-    level = newLevel;
-    _saveData(); // CRITICAL: Save the new level immediately
-    notifyListeners(); // Updates the UI progress bar
+  // 2. Only update if the calculated level is HIGHER than the current saved level
+  if (calculatedLevel > level) {
+    level = calculatedLevel;
+    _saveData(); 
+    notifyListeners(); 
   }
 }
   
@@ -831,9 +870,14 @@ void _updateLevel() {
     
     // Once game is officially over:
     gameOver = true;
-  final service = LeaderboardService();
-  String playerName = await service.getPlayerName(); // Get real name
-  service.submitScore(playerName, score); // Submit real name
+  if (mode == GameMode.classic) {
+    final service = LeaderboardService();
+    String playerName = await service.getPlayerName(); 
+    service.submitScore(playerName, score); 
+    if (score > (_bestScores[GameMode.classic] ?? 0)) {
+      _bestScores[GameMode.classic] = score;
+    }
+  }
     
     _saveData();
     notifyListeners();
@@ -848,9 +892,10 @@ void _updateLevel() {
   // --- UPDATED LOAD/SAVE FOR RESUME LOGIC ---
   Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
-    level = prefs.getInt('current_level') ?? 1;
-    totalSecondsPlayed = prefs.getInt('total_playtime') ?? 0;
-highestTileReached = prefs.getInt('highest_tile') ?? 0;
+    score = prefs.getInt('current_score') ?? 0;
+  level = prefs.getInt('current_level') ?? 1;
+  totalSecondsPlayed = prefs.getInt('total_playtime') ?? 0;
+  highestTileReached = prefs.getInt('highest_tile') ?? 0;
   
   // Load best scores for every mode individually
   for (var m in GameMode.values) {
@@ -880,9 +925,9 @@ Future<void> _saveData() async {
 await prefs.setInt('highest_tile', highestTileReached);
 
   // 1. Update mode-specific high score
-  if (score > bestScore) {
-    _bestScores[mode] = score;
-    await prefs.setInt('best_score_${mode.name}', score);
+  if (mode == GameMode.classic && score > bestScore) {
+    _bestScores[GameMode.classic] = score;
+    await prefs.setInt('best_score_classic', score);
   }
   
   // 2. Save current game state
@@ -988,19 +1033,24 @@ class _MainMenuState extends State<MainMenu> {
   }
 
   // Proper function definition (not inside another function)
-  void _refreshLeaderboardData({bool force = false}) {
-    final engine = Provider.of<GameEngine>(context, listen: false);
-    final service = LeaderboardService();
-    
-    if (force || _rankFuture == null) {
-      setState(() {
-        if (engine.bestScore > 0) {
-          _rankFuture = service.getPlayerRank(engine.bestScore);
-        }
-        _leaderboardFuture = service.getGlobalScoresFuture();
-      });
-    }
+  // Inside _MainMenuState in main.dart
+void _refreshLeaderboardData({bool force = false}) {
+  final engine = Provider.of<GameEngine>(context, listen: false);
+  final service = LeaderboardService();
+  
+  // Explicitly pull the Classic mode score
+  int classicBest = engine._bestScores[GameMode.classic] ?? 0;
+
+  if (force || _rankFuture == null) {
+    setState(() {
+      // Always calculate rank based on Classic Best
+      if (classicBest > 0) {
+        _rankFuture = service.getPlayerRank(classicBest); 
+      }
+      _leaderboardFuture = service.getGlobalScoresFuture();
+    });
   }
+}
 
   Future<void> _checkFirstTimeUser() async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -1204,14 +1254,14 @@ void _performSingleRefresh() {
 
   // --- AFTER ---
 Widget _buildStatsCard(GameEngine engine) {
-  // REMOVED: _updateRank(engine.bestScore); <--- This was the cause of the loop
+  int classicBest = engine._bestScores[GameMode.classic] ?? 0;
 
   return Container(
     // ... your existing decoration ...
     child: Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
-        _statItem("Best", "${engine.bestScore}", engine.themeColor),
+        _statItem("Best (Classic)", "$classicBest", engine.themeColor),
         
         GestureDetector(
           // SCENARIO C: Manual Reload Button
@@ -1291,39 +1341,45 @@ Widget _statItem(String label, String value, Color themeColor) { // Add themeCol
 
   // --- UPDATED PLAY BUTTONS (RESUME & NEW GAME) ---
   Widget _buildMainPlayButton(BuildContext context, GameEngine engine) {
-    return Column(
-      children: [
-        if (engine.hasSavedGame) ...[
-          _customMenuButton(
-  context,
-  "RESUME GAME",
-  engine.themeColor,
-  Colors.black,
-  () async {
-    // Execution pauses here until the GameScreen is closed
-    await Navigator.push(context, MaterialPageRoute(builder: (_) => const GameScreen()));
-    
-    // When they return, we check if they finished the game
-    if (mounted && Provider.of<GameEngine>(context, listen: false).gameOver) {
-      _performSingleRefresh(); // Game ended: Reloads once.
-    }
-  },
-),
-          const SizedBox(height: 16),
-        ],
+  return Column(
+    children: [
+      if (engine.hasSavedGame) ...[
         _customMenuButton(
           context,
-          "NEW GAME",
-          engine.hasSavedGame ? Colors.white.withOpacity(0.05) : engine.themeColor,
-          engine.hasSavedGame ? Colors.white : Colors.black,
-          () {
-            engine.newGame();
-            Navigator.push(context, MaterialPageRoute(builder: (_) => const GameScreen()));
+          "RESUME GAME",
+          engine.themeColor,
+          Colors.black,
+          () async {
+            // 1. Wait for user to finish playing
+            await Navigator.push(context, MaterialPageRoute(builder: (_) => const GameScreen()));
+            
+            // 2. This runs AFTER the GameScreen is popped
+            if (mounted) {
+              _performSingleRefresh(); // Forces rank and leaderboard reload
+              Provider.of<GameEngine>(context, listen: false)._loadData();
+            }
           },
         ),
+        const SizedBox(height: 16),
       ],
-    );
-  }
+      _customMenuButton(
+        context,
+        "NEW GAME",
+        engine.hasSavedGame ? Colors.white.withOpacity(0.05) : engine.themeColor,
+        engine.hasSavedGame ? Colors.white : Colors.black,
+        () async {
+          engine.newGame();
+          await Navigator.push(context, MaterialPageRoute(builder: (_) => const GameScreen()));
+          
+          // Refresh after returning from a New Game too
+          if (mounted) {
+            _performSingleRefresh();
+          }
+        },
+      ),
+    ],
+  );
+}
 
   Widget _customMenuButton(BuildContext context, String text, Color bg, Color textColor, VoidCallback onPressed) {
     return SizedBox(
@@ -1457,7 +1513,8 @@ if (snapshot.connectionState == ConnectionState.waiting && _leaderboardFuture !=
                     _leaderRow(
                       "YOU",
                       currentPlayerName,
-                      engine.bestScore.toString(),
+                      // Force it to show Classic Best, not engine.bestScore (which follows the current mode)
+                      (engine._bestScores[GameMode.classic] ?? 0).toString(),
                       isCurrentPlayer: true,
                     ),
                   ],
@@ -1594,11 +1651,15 @@ class _GameScreenState extends State<GameScreen> {
 
 @override
 void dispose() {
-  // Stop tracking when leaving the game screen
-  context.read<GameEngine>().stopPlaytimeTracking();
+  // We use Provider.of with listen: false because it is more stable in dispose
+  try {
+    Provider.of<GameEngine>(context, listen: false).stopPlaytimeTracking();
+  } catch (e) {
+    // If the context is already deactivated, we catch the error to prevent a crash
+    debugPrint("Safe dispose: GameEngine tracking stopped or context was lost.");
+  }
   super.dispose();
 }
-
   @override
   Widget build(BuildContext context) {
     final engine = context.watch<GameEngine>();

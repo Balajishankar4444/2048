@@ -2,7 +2,7 @@ name: infinity_merge
 description: "A professional merge puzzle game."
 publish_to: 'none'
 
-version: 1.0.0+4
+version: 1.0.0+1
 
 environment:
   sdk: ^3.11.1
@@ -38,9 +38,8 @@ flutter:
     - assets/bigcollision.mp3
 
 flutter_launcher_icons:
-  android: "ic_launcher"
+  android: true
   ios: true
   image_path: "assets/Logo.png"
-  min_sdk_android: 21
-  adaptive_icon_background: "#007AFF"
+  adaptive_icon_background: "#0D1B3D"
   adaptive_icon_foreground: "assets/Logo.png"
