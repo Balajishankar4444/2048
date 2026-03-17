@@ -483,6 +483,10 @@ class GameEngine extends ChangeNotifier {
     else {
       SoundManager.playSwipe();
     }
+    if (score > (_bestScores[mode] ?? 0)) {
+  _bestScores[mode] = score;
+  _saveData(); 
+}
 
     grid = newGrid;
     addNewTile();
@@ -870,14 +874,20 @@ void _updateLevel() {
     
     // Once game is officially over:
     gameOver = true;
+  
+  // Update local best for the current mode
+  if (score > (_bestScores[mode] ?? 0)) {
+    _bestScores[mode] = score;
+  }
+
+  // Submit to Global Leaderboard ONLY if Classic
   if (mode == GameMode.classic) {
     final service = LeaderboardService();
     String playerName = await service.getPlayerName(); 
-    service.submitScore(playerName, score); 
+    await service.submitScore(playerName, score); 
   }
-  
-  // Everyone gets their personal best saved locally
-  _saveData(); 
+    
+  _saveData();
   notifyListeners();
   }
 
@@ -915,26 +925,33 @@ void _updateLevel() {
     }
     notifyListeners();
   }
+
 Future<void> _saveData() async {
   final prefs = await SharedPreferences.getInstance();
-  
-  // 1. Update the local best score for the CURRENT mode
-  if (score > bestScore) {
+  final service = LeaderboardService();
+
+  // 1. UPDATE LOCAL HIGH SCORE FOR THE CURRENT MODE
+  if (score > (_bestScores[mode] ?? 0)) {
     _bestScores[mode] = score;
-    // Save to a unique key, e.g., 'best_score_timeAttack'
+    // Save with a unique key for each mode (e.g., best_score_timeAttack)
     await prefs.setInt('best_score_${mode.name}', score);
+
+    // 2. ONLY SUBMIT TO CLOUD LEADERBOARD IF IN CLASSIC MODE
+    if (mode == GameMode.classic) {
+      String playerName = await service.getPlayerName();
+      await service.submitScore(playerName, score);
+    }
   }
 
-  // 2. Save general stats
+  // 3. Save the rest of the game state as usual
+  await prefs.setInt('current_score', score);
   await prefs.setInt('current_level', level);
   await prefs.setInt('total_playtime', totalSecondsPlayed);
   await prefs.setInt('highest_tile', highestTileReached);
-  await prefs.setInt('current_score', score);
   await prefs.setInt('undos', undosAvailable);
   await prefs.setInt('shuffles', shufflesAvailable);
   await prefs.setInt('blasts', blastsAvailable);
 
-  // 3. Save the tile layout
   String encoded = jsonEncode(tiles.map((t) => t.toJson()).toList());
   await prefs.setString('saved_tiles', encoded);
   _hasSavedGame = true;
@@ -1045,6 +1062,9 @@ void _refreshLeaderboardData({bool force = false}) {
       if (classicBest > 0) {
         _rankFuture = service.getPlayerRank(classicBest); 
       }
+      else {
+        _rankFuture = Future.value(0); // No rank if no classic score
+      }
       _leaderboardFuture = service.getGlobalScoresFuture();
     });
   }
@@ -1147,16 +1167,18 @@ void _refreshLeaderboardData({bool force = false}) {
   }
 
 // Update your refresh function to include the leaderboard
+// Inside _MainMenuState in main.dart
 void _performSingleRefresh() {
   final engine = Provider.of<GameEngine>(context, listen: false);
   final service = LeaderboardService();
   
+  // Lock this to Classic Mode high score
+  int classicBest = engine._bestScores[GameMode.classic] ?? 0;
+  
   setState(() {
-    // Refresh Rank
-    if (engine.bestScore > 0) {
-      _rankFuture = service.getPlayerRank(engine.bestScore);
+    if (classicBest > 0) {
+      _rankFuture = service.getPlayerRank(classicBest);
     }
-    // Refresh Leaderboard Preview
     _leaderboardFuture = service.getGlobalScoresFuture();
   });
 }
@@ -1262,7 +1284,6 @@ Widget _buildStatsCard(GameEngine engine) {
         _statItem("Best (Classic)", "$classicBest", engine.themeColor),
         
         GestureDetector(
-          // SCENARIO C: Manual Reload Button
           onTap: () => _performSingleRefresh(), 
           child: FutureBuilder<int>(
             future: _rankFuture,
@@ -1343,21 +1364,20 @@ Widget _statItem(String label, String value, Color themeColor) { // Add themeCol
     children: [
       if (engine.hasSavedGame) ...[
         _customMenuButton(
-          context,
-          "RESUME GAME",
-          engine.themeColor,
-          Colors.black,
-          () async {
-            // 1. Wait for user to finish playing
-            await Navigator.push(context, MaterialPageRoute(builder: (_) => const GameScreen()));
-            
-            // 2. This runs AFTER the GameScreen is popped
-            if (mounted) {
-              _performSingleRefresh(); // Forces rank and leaderboard reload
-              Provider.of<GameEngine>(context, listen: false)._loadData();
-            }
-          },
-        ),
+  context,
+  "RESUME GAME",
+  engine.themeColor,
+  Colors.black,
+  () async {
+    // This waits for the GameScreen to be closed (either by GameOver or Home button)
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => const GameScreen()));
+    
+    // This runs the moment you are back on the Main Menu
+    if (mounted) {
+      _performSingleRefresh(); 
+    }
+  },
+),
         const SizedBox(height: 16),
       ],
       _customMenuButton(
