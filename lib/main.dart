@@ -874,13 +874,11 @@ void _updateLevel() {
     final service = LeaderboardService();
     String playerName = await service.getPlayerName(); 
     service.submitScore(playerName, score); 
-    if (score > (_bestScores[GameMode.classic] ?? 0)) {
-      _bestScores[GameMode.classic] = score;
-    }
   }
-    
-    _saveData();
-    notifyListeners();
+  
+  // Everyone gets their personal best saved locally
+  _saveData(); 
+  notifyListeners();
   }
 
   void _handleGameEnd() {
@@ -918,25 +916,25 @@ void _updateLevel() {
     notifyListeners();
   }
 Future<void> _saveData() async {
-  
   final prefs = await SharedPreferences.getInstance();
+  
+  // 1. Update the local best score for the CURRENT mode
+  if (score > bestScore) {
+    _bestScores[mode] = score;
+    // Save to a unique key, e.g., 'best_score_timeAttack'
+    await prefs.setInt('best_score_${mode.name}', score);
+  }
+
+  // 2. Save general stats
   await prefs.setInt('current_level', level);
   await prefs.setInt('total_playtime', totalSecondsPlayed);
-await prefs.setInt('highest_tile', highestTileReached);
-
-  // 1. Update mode-specific high score
-  if (mode == GameMode.classic && score > bestScore) {
-    _bestScores[GameMode.classic] = score;
-    await prefs.setInt('best_score_classic', score);
-  }
-  
-  // 2. Save current game state
+  await prefs.setInt('highest_tile', highestTileReached);
   await prefs.setInt('current_score', score);
-  await prefs.setInt('current_level', level);
   await prefs.setInt('undos', undosAvailable);
   await prefs.setInt('shuffles', shufflesAvailable);
   await prefs.setInt('blasts', blastsAvailable);
 
+  // 3. Save the tile layout
   String encoded = jsonEncode(tiles.map((t) => t.toJson()).toList());
   await prefs.setString('saved_tiles', encoded);
   _hasSavedGame = true;
