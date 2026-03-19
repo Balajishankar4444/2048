@@ -2,7 +2,7 @@ name: infinity_merge
 description: "A professional merge puzzle game."
 publish_to: 'none'
 
-version: 1.0.0+2
+version: 1.0.0+3
 
 environment:
   sdk: ^3.11.1

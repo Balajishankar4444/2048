@@ -1674,6 +1674,8 @@ Widget _rewardTile(BuildContext context, GameEngine engine, String type, IconDat
       
       await _showFakeAd(context); // 2. Wait for the 3-second ad
       if (!mounted) return; 
+      await Future.delayed(const Duration(milliseconds: 200));
+      if (!mounted) return;
 
       engine.addReward(type); // 3. Add & Save
       
@@ -1731,20 +1733,37 @@ Widget _rewardOption(String title, IconData icon, bool isSelected, VoidCallback 
     );
   }
 
-  void _showSuccessPopup(BuildContext context, String powerName) { // Changed this line
+  void _showSuccessPopup(BuildContext context, String rewardName) {
+  // If the screen was closed while the ad played, don't try to show a dialog
+  if (!context.mounted) return;
+
   showDialog(
     context: context,
-    builder: (context) => AlertDialog(
-      title: const Text("Success!"),
-      // Changed the text below to use the single powerName
-      content: Text("You received: $powerName. This is now saved for your next game!"), 
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context), 
-          child: const Text("AWESOME"),
-        )
-      ],
-    ),
+    builder: (BuildContext dialogContext) {
+      return AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.check_circle, color: Colors.green, size: 60),
+            const SizedBox(height: 16),
+            const Text("REWARD GRANTED", 
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Text("You received 1 extra $rewardName!", 
+              style: const TextStyle(color: Colors.white70),
+              textAlign: TextAlign.center),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text("GREAT"),
+          ),
+        ],
+      );
+    },
   );
 }
 }
