@@ -76,6 +76,7 @@ class LeaderboardService {
     return query.docs.isNotEmpty;
   }
 
+
   // Update name on server
   Future<void> updateNameOnServer(String newName) async {
     final prefs = await SharedPreferences.getInstance();
@@ -388,10 +389,14 @@ class GameEngine extends ChangeNotifier {
   bool isGameWon = false;
 
   GameEngine() {
-    _loadData();
-    _loadTheme();
-    initGame();
-  }
+  _init();
+}
+
+Future<void> _init() async {
+  await _loadData();
+  await _loadTheme();
+  initGame();
+}
 
   void initGame() {
     grid = List.generate(4, (_) => List.filled(4, 0));
@@ -500,6 +505,15 @@ class GameEngine extends ChangeNotifier {
   }
 }
 
+void addReward(String powerType) {
+  if (powerType == 'UNDO') undosAvailable++;
+  if (powerType == 'SHUFFLE') shufflesAvailable++;
+  if (powerType == 'BLAST') blastsAvailable++;
+  
+  _saveData(); // Persist to SharedPreferences immediately
+  notifyListeners();
+}
+
   void checkGameState() {
     for (int i = 0; i < 4; i++) {
       for (int j = 0; j < 4; j++) {
@@ -573,9 +587,9 @@ void _updateHighestTile() {
   survivalMoves = 0;
   survivalSeconds = 0;
 
-  undosAvailable = 1;
-  shufflesAvailable = 1;
-  blastsAvailable = 1;
+  if (undosAvailable < 1) undosAvailable = 1;
+  if (shufflesAvailable < 1) shufflesAvailable = 1;
+  if (blastsAvailable < 1) blastsAvailable = 1;
 
   modeTimer?.cancel();
 
@@ -910,6 +924,10 @@ void _updateLevel() {
     _bestScores[m] = prefs.getInt('best_score_${m.name}') ?? 0;
   }
 
+  undosAvailable = prefs.getInt('undos') ?? 1;
+  shufflesAvailable = prefs.getInt('shuffles') ?? 1;
+  blastsAvailable = prefs.getInt('blasts') ?? 1;
+
     String? savedTiles = prefs.getString('saved_tiles');
     if (savedTiles != null) {
       List<dynamic> decoded = jsonDecode(savedTiles);
@@ -951,10 +969,19 @@ Future<void> _saveData() async {
   await prefs.setInt('undos', undosAvailable);
   await prefs.setInt('shuffles', shufflesAvailable);
   await prefs.setInt('blasts', blastsAvailable);
+  await prefs.setInt('best_score', bestScore);
+  await prefs.setInt('current_score', score);
 
+  // ADD THESE LINES to save your powers:
+  await prefs.setInt('undos', undosAvailable);
+  await prefs.setInt('shuffles', shufflesAvailable);
+  await prefs.setInt('blasts', blastsAvailable);
+
+  // Existing tile saves...
   String encoded = jsonEncode(tiles.map((t) => t.toJson()).toList());
   await prefs.setString('saved_tiles', encoded);
   _hasSavedGame = true;
+  notifyListeners();
 }
 }
 
@@ -1261,7 +1288,7 @@ void _performSingleRefresh() {
                   _buildLeaderboardPreview(context),
                   const SizedBox(height: 30),
                   _buildSectionHeader("Daily Rewards"),
-                  _buildRewardsSection(),
+                  _buildRewardsSection(context, engine),
                   const SizedBox(height: 50),
                 ],
               ),
@@ -1583,37 +1610,84 @@ if (snapshot.connectionState == ConnectionState.waiting && _leaderboardFuture !=
   );
 }
 
-  Widget _buildRewardsSection() {
-  // Add this line to define engine in this scope
-  final engine = Provider.of<GameEngine>(context); 
-
-  return Container(
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      // Use engine.themeColor instead of the hardcoded purple
-      gradient: LinearGradient(
-        colors: [engine.themeColor.withOpacity(0.2), Colors.transparent]
+  Widget _buildRewardsSection(BuildContext context, GameEngine engine) {
+  return GestureDetector(
+    onTap: () => _showPowerSelectionDialog(context, engine),
+    child: Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(colors: [const Color(0xFFBB86FC).withOpacity(0.2), Colors.transparent]),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white10),
       ),
-      borderRadius: BorderRadius.circular(20),
-      border: Border.all(color: Colors.white10),
-    ),
-    child: Row( // REMOVED 'const' from here
-      children: [
-        // Use engine.themeColor here
-        Icon(Icons.play_circle_fill, color: engine.themeColor, size: 40), 
-        const SizedBox(width: 15),
-        const Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text("Unlock Power-ups", style: TextStyle(fontWeight: FontWeight.bold)),
-              Text("Watch a short ad to get a free UNDO", style: TextStyle(fontSize: 11, color: Colors.white38)),
-            ],
+      child: const Row(
+        children: [
+          Icon(Icons.play_circle_fill, color: Color(0xFFBB86FC), size: 40),
+          SizedBox(width: 15),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text("Unlock Power-ups", style: TextStyle(fontWeight: FontWeight.bold)),
+                Text("Watch an ad to choose a free powers", style: TextStyle(fontSize: 11, color: Colors.white38)),
+              ],
+            ),
           ),
-        ),
-        const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.white24),
+          Icon(Icons.arrow_forward_ios, size: 14, color: Colors.white24),
+        ],
+      ),
+    ),
+  );
+}
+
+void _showPowerSelectionDialog(BuildContext context, GameEngine engine) {
+  showDialog(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Center(child: Text("Choose 1 Reward")),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Option 1: Undo
+          _rewardTile(context, engine, "UNDO", Icons.undo, "Undo Power"),
+          // Option 2: Swap
+          _rewardTile(context, engine, "SHUFFLE", Icons.shuffle, "Shuffle Power"),
+          // Option 3: Blast
+          _rewardTile(context, engine, "BLAST", Icons.auto_fix_high, "Blast Power"),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text("CLOSE")),
       ],
     ),
+  );
+}
+
+// Helper widget for the selection list
+// Inside _MainMenuState in main.dart
+Widget _rewardTile(BuildContext context, GameEngine engine, String type, IconData icon, String label) {
+  return ListTile(
+    leading: Icon(icon, color: engine.themeColor), // Use engine.themeColor for consistency
+    title: Text(label),
+    onTap: () async {
+      Navigator.pop(context); // 1. Close the choice menu
+      
+      await _showFakeAd(context); // 2. Wait for the 3-second ad
+      if (!mounted) return; 
+
+      engine.addReward(type); // 3. Add & Save
+      
+      _showSuccessPopup(context, label); // 4. Show success popup safely
+    },
+  );
+}
+
+Widget _rewardOption(String title, IconData icon, bool isSelected, VoidCallback onTap) {
+  return ListTile(
+    leading: Icon(icon, color: isSelected ? const Color(0xFFBB86FC) : Colors.white38),
+    title: Text(title),
+    trailing: Icon(isSelected ? Icons.check_circle : Icons.circle_outlined),
+    onTap: onTap,
   );
 }
 
@@ -1629,6 +1703,50 @@ if (snapshot.connectionState == ConnectionState.waiting && _leaderboardFuture !=
       ),
     );
   }
+
+  Future<void> _showFakeAd(BuildContext context) async {
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        Future.delayed(const Duration(seconds: 3), () {
+  if (Navigator.canPop(context)) {
+    Navigator.pop(context);
+  }
+});
+        return const Scaffold(
+          backgroundColor: Colors.black,
+          body: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                CircularProgressIndicator(color: Color(0xFFBB86FC)),
+                SizedBox(height: 20),
+                Text("AD RUNNING...", style: TextStyle(letterSpacing: 4, fontWeight: FontWeight.bold)),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showSuccessPopup(BuildContext context, String powerName) { // Changed this line
+  showDialog(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text("Success!"),
+      // Changed the text below to use the single powerName
+      content: Text("You received: $powerName. This is now saved for your next game!"), 
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context), 
+          child: const Text("AWESOME"),
+        )
+      ],
+    ),
+  );
+}
 }
 
 // --- GAME SCREEN UI ---
